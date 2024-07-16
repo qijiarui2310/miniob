@@ -11,6 +11,7 @@ See the Mulan PSL v2 for more details. */
 //
 // Created by Meiyi & Longda on 2021/4/13.
 //
+#include <cstring>
 #include "storage/record/record_manager.h"
 #include "common/log/log.h"
 #include "storage/common/condition_filter.h"
@@ -184,8 +185,8 @@ RC RecordPageHandler::init_empty_page(
   page_header_->data_offset    = align8(PAGE_HEADER_SIZE + page_bitmap_size(page_header_->record_capacity)) +
                               column_num * sizeof(int) /* column index*/;
   this->fix_record_capacity();
-  ASSERT(page_header_->data_offset + page_header_->record_capacity * page_header_->record_size 
-              <= BP_PAGE_DATA_SIZE, 
+  ASSERT(page_header_->data_offset + page_header_->record_capacity * page_header_->record_size
+              <= BP_PAGE_DATA_SIZE,
          "Record overflow the page size");
 
   bitmap_ = frame_->data() + PAGE_HEADER_SIZE;
@@ -203,7 +204,7 @@ RC RecordPageHandler::init_empty_page(
 
   rc = log_handler_.init_new_page(frame_, page_num, span((const char *)column_index, column_num * sizeof(int)));
   if (OB_FAIL(rc)) {
-    LOG_ERROR("Failed to init empty page: write log failed. page_num:record_size %d:%d. rc=%s", 
+    LOG_ERROR("Failed to init empty page: write log failed. page_num:record_size %d:%d. rc=%s",
               page_num, record_size, strrc(rc));
     return rc;
   }
@@ -232,8 +233,8 @@ RC RecordPageHandler::init_empty_page(DiskBufferPool &buffer_pool, LogHandler &l
   page_header_->data_offset    = align8(PAGE_HEADER_SIZE + page_bitmap_size(page_header_->record_capacity)) +
                               column_num * sizeof(int) /* column index*/;
   this->fix_record_capacity();
-  ASSERT(page_header_->data_offset + page_header_->record_capacity * page_header_->record_size 
-              <= BP_PAGE_DATA_SIZE, 
+  ASSERT(page_header_->data_offset + page_header_->record_capacity * page_header_->record_size
+              <= BP_PAGE_DATA_SIZE,
          "Record overflow the page size");
 
   bitmap_ = frame_->data() + PAGE_HEADER_SIZE;
@@ -243,7 +244,7 @@ RC RecordPageHandler::init_empty_page(DiskBufferPool &buffer_pool, LogHandler &l
   memcpy(column_index, col_idx_data, column_num * sizeof(int));
 
   if (OB_FAIL(rc)) {
-    LOG_ERROR("Failed to init empty page: write log failed. page_num:record_size %d:%d. rc=%s", 
+    LOG_ERROR("Failed to init empty page: write log failed. page_num:record_size %d:%d. rc=%s",
               page_num, record_size, strrc(rc));
     return rc;
   }
@@ -268,7 +269,7 @@ RC RecordPageHandler::cleanup()
 
 RC RowRecordPageHandler::insert_record(const char *data, RID *rid)
 {
-  ASSERT(rw_mode_ != ReadWriteMode::READ_ONLY, 
+  ASSERT(rw_mode_ != ReadWriteMode::READ_ONLY,
          "cannot insert record into page while the page is readonly");
 
   if (page_header_->record_num == page_header_->record_capacity) {
@@ -328,7 +329,7 @@ RC RowRecordPageHandler::recover_insert_record(const char *data, const RID &rid)
 
 RC RowRecordPageHandler::delete_record(const RID *rid)
 {
-  ASSERT(rw_mode_ != ReadWriteMode::READ_ONLY, 
+  ASSERT(rw_mode_ != ReadWriteMode::READ_ONLY,
          "cannot delete record from page while the page is readonly");
 
   Bitmap bitmap(bitmap_, page_header_->record_capacity);
@@ -373,7 +374,7 @@ RC RowRecordPageHandler::update_record(const RID &rid, const char *data)
 
     RC rc = log_handler_.update_record(frame_, rid, data);
     if (OB_FAIL(rc)) {
-      LOG_ERROR("Failed to update record. page_num %d:%d. rc=%s", 
+      LOG_ERROR("Failed to update record. page_num %d:%d. rc=%s",
                 disk_buffer_pool_->file_desc(), frame_->page_num(), strrc(rc));
       // return rc; // ignore errors
     }
@@ -416,13 +417,48 @@ bool RecordPageHandler::is_full() const { return page_header_->record_num >= pag
 
 RC PaxRecordPageHandler::insert_record(const char *data, RID *rid)
 {
+  ASSERT(rw_mode_ != ReadWriteMode::READ_ONLY,
+         "cannot insert record into page while the page is readonly");
+
+  if (page_header_->record_num == page_header_->record_capacity) {
+    LOG_WARN("Page is full, page_num %d:%d.", disk_buffer_pool_->file_desc(), frame_->page_num());
+    return RC::RECORD_NOMEM;
+  }
+  // 找到空闲位置
+  common::Bitmap bitmap(bitmap_, page_header_->record_capacity);
+  int index = bitmap.next_unsetted_bit(0);
+  bitmap.set_bit(index);
+  page_header_->record_num++;
+
+  RC rc = log_handler_.insert_record(frame_, RID(get_page_num(), index), data);
+  if (OB_FAIL(rc)) {
+    LOG_ERROR("Failed to insert record. page_num %d:%d. rc=%s", disk_buffer_pool_->file_desc(), frame_->page_num(), strrc(rc));
+    // return rc; // ignore errors
+  }
+
+  // assert index < page_header_->record_capacity
+  // 分别将每个字段的数据存储到相应的列位置
+  for (int col_id = 0; col_id < page_header_->column_num; col_id++) {
+    char *field_data = get_field_data(index, col_id);
+    int field_len = get_field_len(col_id);
+    memcpy(field_data, data + page_header_->col_idx_offset + col_id * field_len, field_len);
+  }
+
+  frame_->mark_dirty();
+
+  if (rid) {
+    rid->page_num = get_page_num();
+    rid->slot_num = index;
+  }
+
+  // LOG_TRACE("Insert record. rid page_num=%d, slot num=%d", get_page_num(), index);
+  return RC::SUCCESS;
   // your code here
-  exit(-1);
 }
 
 RC PaxRecordPageHandler::delete_record(const RID *rid)
 {
-  ASSERT(rw_mode_ != ReadWriteMode::READ_ONLY, 
+  ASSERT(rw_mode_ != ReadWriteMode::READ_ONLY,
          "cannot delete record from page while the page is readonly");
 
   Bitmap bitmap(bitmap_, page_header_->record_capacity);
@@ -446,16 +482,62 @@ RC PaxRecordPageHandler::delete_record(const RID *rid)
 
 RC PaxRecordPageHandler::get_record(const RID &rid, Record &record)
 {
+  if (rid.slot_num >= page_header_->record_capacity) {
+    LOG_ERROR("Invalid slot_num %d, exceed page's record capacity, frame=%s, page_header=%s",
+              rid.slot_num, frame_->to_string().c_str(), page_header_->to_string().c_str());
+    return RC::RECORD_INVALID_RID;
+  }
+
+  Bitmap bitmap(bitmap_, page_header_->record_capacity);
+  if (!bitmap.get_bit(rid.slot_num)) {
+    LOG_ERROR("Invalid slot_num:%d, slot is empty, page_num %d.", rid.slot_num, frame_->page_num());
+    return RC::RECORD_NOT_EXIST;
+  }
+  record.set_rid(rid);
+  size_t record_size = page_header_->record_real_size;
+  char *data = new char[record_size]; // 分配足够大小的内存
+  char *current_position = data;
+
+  for (int col_id = 0; col_id < page_header_->column_num; col_id++) {
+    char *record_data = get_field_data(rid.slot_num, col_id);
+    int field_len = get_field_len(col_id);
+    if (record_data != nullptr) { // 确保记录数据非空
+      memcpy(current_position, record_data, field_len);
+      current_position += field_len;
+    }
+  }
+
+  record.set_data(data, record_size);
+  delete[] data; // 确保分配的内存被释放
+  return RC::SUCCESS;
   // your code here
-  exit(-1);
 }
 
 // TODO: specify the column_ids that chunk needed. currenly we get all columns
 RC PaxRecordPageHandler::get_chunk(Chunk &chunk)
 {
-  // your code here
-  exit(-1);
+  // 检查页面是否有记录
+  auto num = page_header_->record_num;
+  if (num == 0) {
+    LOG_WARN("Page has no records.");
+    return RC::SUCCESS;
+  }
+  common::Bitmap bitmap(bitmap_, page_header_->record_capacity);
+  auto chunk_size = chunk.column_num();
+  for (int i = 0; i < chunk_size; i++) {
+    int col_id = chunk.column_ids(i);
+    auto &column = chunk.column(i);
+    // 将页面中的每条记录的该列数据拷贝到chunk中
+    for (int slot_num = 0; slot_num < page_header_->record_capacity; slot_num++) {
+      if (bitmap.get_bit(slot_num)) {
+        char *src_field_data = get_field_data(slot_num, col_id);
+        column.append_one(src_field_data);
+      }
+    }
+  }
+  return RC::SUCCESS;
 }
+
 
 char *PaxRecordPageHandler::get_field_data(SlotNum slot_num, int col_id)
 {
