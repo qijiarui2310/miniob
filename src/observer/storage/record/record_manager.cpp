@@ -438,10 +438,12 @@ RC PaxRecordPageHandler::insert_record(const char *data, RID *rid)
 
   // assert index < page_header_->record_capacity
   // 分别将每个字段的数据存储到相应的列位置
+  int prev_cols_len = 0;
   for (int col_id = 0; col_id < page_header_->column_num; col_id++) {
     char *field_data = get_field_data(index, col_id);
     int field_len = get_field_len(col_id);
-    memcpy(field_data, data + page_header_->col_idx_offset + col_id * field_len, field_len);
+    memcpy(field_data, data + prev_cols_len / page_header_->record_capacity, field_len);
+    prev_cols_len +=  page_header_->record_capacity * field_len;
   }
 
   frame_->mark_dirty();
@@ -494,21 +496,18 @@ RC PaxRecordPageHandler::get_record(const RID &rid, Record &record)
     return RC::RECORD_NOT_EXIST;
   }
   record.set_rid(rid);
-  size_t record_size = page_header_->record_real_size;
-  char *data = new char[record_size]; // 分配足够大小的内存
-  char *current_position = data;
+  auto rc = record.new_record(page_header_->record_size);
+  (void)rc;
 
-  for (int col_id = 0; col_id < page_header_->column_num; col_id++) {
+  int prev_cols_len = 0;
+  int column_num = page_header_->column_num;
+
+  for (int col_id = 0; col_id < column_num; col_id++) {
+    int col_len = get_field_len(col_id);
     char *record_data = get_field_data(rid.slot_num, col_id);
-    int field_len = get_field_len(col_id);
-    if (record_data != nullptr) { // 确保记录数据非空
-      memcpy(current_position, record_data, field_len);
-      current_position += field_len;
-    }
+    record.set_field(prev_cols_len / page_header_->record_capacity, col_len , record_data);
+    prev_cols_len +=  page_header_->record_capacity * col_len;
   }
-
-  record.set_data(data, record_size);
-  delete[] data; // 确保分配的内存被释放
   return RC::SUCCESS;
   // your code here
 }
