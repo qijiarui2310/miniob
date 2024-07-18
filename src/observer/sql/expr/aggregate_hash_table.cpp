@@ -14,8 +14,48 @@ See the Mulan PSL v2 for more details. */
 
 RC StandardAggregateHashTable::add_chunk(Chunk &groups_chunk, Chunk &aggrs_chunk)
 {
-  // your code here
-  exit(-1);
+  /** 1 2 3
+    * 1 3 4
+    * 3 4 5
+   * group by c1，c2
+   *1 2
+   *1 3
+   *3 4
+   * aggrs sum c1
+   * 2
+   * 3
+   * 该函数需要根据group_chunk和aggr_chunk的值，将group_by_values和aggr_values聚合到hash_table中，主要是根据group_chunk的group的列，
+   * 计算相应聚合列的聚合值，并将聚合结果存在hash_table的aggr_values中.
+   */
+  for (size_t i = 0; i < groups_chunk.rows(); ++i) {
+    //用于存储每一行group和aggregate值，即一行一行元素去执行aggregate操作
+    //注意区分aggregate_val和aggr_values_,aggregate_val为chunk中的内容，而aggr_values_为hash_table中聚合后的值，这里只考虑sum的情况
+    std::vector<Value> group_val, aggregate_val;
+    for(size_t col_id = 0; col_id < groups_chunk.column_num(); col_id++){
+      group_val.push_back(groups_chunk.get_value(col_id, i));
+    }
+    for(size_t col_id = 0; col_id < aggrs_chunk.column_num(); col_id++){
+      aggregate_val.push_back(aggrs_chunk.get_value(col_id, i));
+    }
+    //下面执行聚合操作
+    if(aggr_values_.count(group_val)!=0){
+      for(size_t agg_id = 0; agg_id<aggrs_chunk.column_num(); i++){
+        if (aggr_values_[group_val].at(agg_id).attr_type() == AttrType::INTS) {
+          auto old_value = aggr_values_.at(group_val).at(agg_id).get_int();
+          aggr_values_[group_val].at(agg_id).set_int(old_value + aggregate_val.at(agg_id).get_int());
+        } else if (aggr_values_[group_val].at(agg_id).attr_type() == AttrType::FLOATS) {
+          auto old_value = aggr_values_.at(group_val).at(agg_id).get_float();
+          aggr_values_[group_val].at(agg_id).set_int(old_value + aggregate_val.at(agg_id).get_float());
+        } else {
+          ASSERT(false, "not supported value type");
+        }
+      }
+    }else{
+      aggr_values_[group_val] = aggregate_val;
+    }
+  }
+
+  return RC::SUCCESS;
 }
 
 void StandardAggregateHashTable::Scanner::open_scan()

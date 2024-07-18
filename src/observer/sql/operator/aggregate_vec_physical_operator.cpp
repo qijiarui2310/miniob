@@ -100,8 +100,37 @@ void AggregateVecPhysicalOperator::update_aggregate_state(void *state, const Col
 
 RC AggregateVecPhysicalOperator::next(Chunk &chunk)
 {
-  // your code here
-  exit(-1);
+  // 如果已经调用过next，则返回RECORD_EOF
+  if(call_){
+    return RC::RECORD_EOF;
+  }
+  call_ = true;
+    //清空output_chunk
+  output_chunk_.reset_data();
+  for (size_t i = 0; i < aggregate_expressions_.size(); i++) {
+    auto *aggregate_expr = static_cast<AggregateExpr *>(aggregate_expressions_[i]);
+    if (aggregate_expr->aggregate_type() == AggregateExpr::Type::SUM) {
+      if (aggregate_expr->value_type() == AttrType::INTS) {
+        append_to_column<SumState<int>, int>(aggr_values_.at(i), output_chunk_.column(i));
+      }else if (aggregate_expr->value_type() == AttrType::FLOATS) {
+        append_to_column<SumState<float>, float>(aggr_values_.at(i), output_chunk_.column(i));
+      } else {
+        ASSERT(false, "not supported value type");
+      }
+    } else {
+      ASSERT(false, "not supported aggregation type");
+    }
+  }
+
+  // 将output_chunk_的数据传给chunk
+  // 将output_chunk_的数据复制到传入的chunk
+  for (size_t i = 0; i < output_chunk_.column_num(); ++i){
+    auto col_data = output_chunk_.column(i).data();
+    auto &column = chunk.column(i);
+    column.append_one(col_data);
+  }
+  return RC::SUCCESS;
+
 }
 
 RC AggregateVecPhysicalOperator::close()
