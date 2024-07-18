@@ -36,24 +36,24 @@ RC GroupByVecPhysicalOperator::open(Trx *trx)
     LOG_INFO("failed to open child operator. rc=%s", strrc(rc));
     return rc;
   }
-  while ((rc = children_[0]->next(chunk_)) == RC::SUCCESS) {
+  while ((rc = child.next(chunk_)) == RC::SUCCESS) {
     Chunk group_chunk;
     Chunk aggregate_chunk;
     // 从 chunk 中获取 group by 列和聚合列
     int col_id = 0;
     for (auto &expr : group_by_exprs_) {
       Column column;
-      expr->get_column(const_cast<Chunk &>(chunk_), column);
-      group_chunk.add_column(make_unique<Column>(column.attr_type(), sizeof(int)), col_id);
+      expr->get_column(chunk_, column);
+      group_chunk.add_column(make_unique<Column>(column.attr_type(), column.attr_len()), col_id);
       auto col_data = column.data();
       group_chunk.column_ptr(col_id)->append(col_data, column.count());
       col_id++;
     }
     col_id = 0;
-    for (auto &expr : aggregate_exprs_) {
+    for (auto &expr : value_expressions_) {
       Column column;
-      expr->get_column(const_cast<Chunk &>(chunk_), column);
-      aggregate_chunk.add_column(make_unique<Column>(column.attr_type(), sizeof(int)), col_id);
+      expr->get_column(chunk_, column);
+      aggregate_chunk.add_column(make_unique<Column>(column.attr_type(), column.attr_len()), col_id);
       auto col_data = column.data();
       aggregate_chunk.column_ptr(col_id)->append(col_data, column.count());
       col_id++;
@@ -95,7 +95,6 @@ RC GroupByVecPhysicalOperator::next(Chunk &chunk)
   StandardAggregateHashTable::Scanner scanner_(&ht_);
   scanner_.open_scan();
   RC rc = scanner_.next(chunk);
-  scanner_.close_scan();
   if (rc == RC::RECORD_EOF) {
     return RC::RECORD_EOF;
   }

@@ -105,8 +105,6 @@ RC AggregateVecPhysicalOperator::next(Chunk &chunk)
     return RC::RECORD_EOF;
   }
   call_ = true;
-    //清空output_chunk
-  output_chunk_.reset_data();
   for (size_t i = 0; i < aggregate_expressions_.size(); i++) {
     auto *aggregate_expr = static_cast<AggregateExpr *>(aggregate_expressions_[i]);
     if (aggregate_expr->aggregate_type() == AggregateExpr::Type::SUM) {
