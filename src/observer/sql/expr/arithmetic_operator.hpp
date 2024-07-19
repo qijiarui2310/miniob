@@ -150,7 +150,6 @@ struct SubtractOperator
     return left - right;
   }
   // your code here
-
 #if defined(USE_SIMD)
   static inline __m256 operation(__m256 left, __m256 right) { return _mm256_sub_ps(left,right); }
 

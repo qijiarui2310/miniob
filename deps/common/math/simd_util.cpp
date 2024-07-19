@@ -24,19 +24,51 @@ int mm256_sum_epi32(const int *values, int size)
 {
   // your code here
   int sum = 0;
-  for (int i = 0; i < size; i++) {
+  int i = 0;
+
+  __m256i partial_sum = _mm256_setzero_si256();
+
+  for (; i + 8 <= size; i += 8) {
+    __m256i vec = _mm256_loadu_si256((__m256i*)&values[i]);
+    partial_sum = _mm256_add_epi32(partial_sum, vec);
+  }
+
+  alignas(32) int result[8];
+  _mm256_store_si256((__m256i*)result, partial_sum);
+  for (int j = 0; j < 8; j++) {
+    sum += result[j];
+  }
+
+  for (; i < size; i++) {
     sum += values[i];
   }
+
   return sum;
 }
 
 float mm256_sum_ps(const float *values, int size)
 {
   // your code here
-  float sum = 0;
-  for (int i = 0; i < size; i++) {
+  float sum = 0.0f;
+  int i = 0;
+
+  __m256 partial_sum = _mm256_setzero_ps();
+
+  for (; i + 8 <= size; i += 8) {
+    __m256 vec = _mm256_loadu_ps(&values[i]);
+    partial_sum = _mm256_add_ps(partial_sum, vec);
+  }
+
+  alignas(32) float result[8];
+  _mm256_store_ps(result, partial_sum);
+  for (int j = 0; j < 8; j++) {
+    sum += result[j];
+  }
+
+  for (; i < size; i++) {
     sum += values[i];
   }
+
   return sum;
 }
 
