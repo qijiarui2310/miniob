@@ -13,10 +13,12 @@ See the Mulan PSL v2 for more details. */
 
 GroupByVecPhysicalOperator::GroupByVecPhysicalOperator(
     std::vector<std::unique_ptr<Expression>> &&group_by_exprs, std::vector<Expression *> &&expressions)
-    : group_by_exprs_(std::move(group_by_exprs)), ht_(expressions){
+    : group_by_exprs_(std::move(group_by_exprs)){
+  ht_ = std::make_unique<StandardAggregateHashTable>(expressions);
   call_ = false;
-  aggregate_exprs_ = expressions;
+  aggregate_exprs_ = std::move(expressions);
   value_expressions_.reserve(aggregate_exprs_.size());
+  scanner_ = std::make_unique<StandardAggregateHashTable::Scanner>(ht_.get());
   for(auto expr : aggregate_exprs_) {
     auto       *aggregate_expr = static_cast<AggregateExpr *>(expr);
     Expression *child_expr     = aggregate_expr->child().get();
@@ -42,30 +44,28 @@ RC GroupByVecPhysicalOperator::open(Trx *trx)
     // 从 chunk 中获取 group by 列和聚合列
     int col_id = 0;
     for (auto &expr : group_by_exprs_) {
-      Column column;
-      expr->get_column(chunk_, column);
-      group_chunk.add_column(make_unique<Column>(column.attr_type(), column.attr_len()), col_id);
-      auto col_data = column.data();
-      group_chunk.column_ptr(col_id)->append(col_data, column.count());
+      std::unique_ptr<Column> column = std::make_unique<Column>(expr->value_type(),expr->value_length());
+      expr->get_column(chunk_, *column);
+      group_chunk.add_column(std::move(column), col_id);
+      output_chunk_.add_column(make_unique<Column>(expr->value_type(), expr->value_length()), col_id);
       col_id++;
     }
     col_id = 0;
     for (auto &expr : value_expressions_) {
-      Column column;
-      expr->get_column(chunk_, column);
-      aggregate_chunk.add_column(make_unique<Column>(column.attr_type(), column.attr_len()), col_id);
-      auto col_data = column.data();
-      aggregate_chunk.column_ptr(col_id)->append(col_data, column.count());
+      std::unique_ptr<Column> column = std::make_unique<Column>(expr->value_type(),expr->value_length());
+      expr->get_column(chunk_, *column);
+      aggregate_chunk.add_column(std::move(column), col_id);
+      output_chunk_.add_column(make_unique<Column>(expr->value_type(), expr->value_length()), col_id + group_by_exprs_.size());
       col_id++;
     }
-
     // 将 group by 和聚合列添加到哈希表中
-    rc = ht_.add_chunk(group_chunk, aggregate_chunk);
+    rc = ht_->add_chunk(group_chunk, aggregate_chunk);
     if (OB_FAIL(rc)) {
       LOG_INFO("failed to add chunks. rc=%s", strrc(rc));
       return rc;
     }
   }
+  scanner_->open_scan();
   if (rc == RC::RECORD_EOF) {
     rc = RC::SUCCESS;
   }
@@ -74,28 +74,12 @@ RC GroupByVecPhysicalOperator::open(Trx *trx)
 
 RC GroupByVecPhysicalOperator::next(Chunk &chunk)
 {
-  if (call_) {
-    return RC::RECORD_EOF;
-  }
-  call_ = true;
-  int col_id = 0;
-  for(auto& group_expr : group_by_exprs_) {
-    Column col;
-    group_expr->get_column(chunk_, col);
-    chunk.add_column(make_unique<Column>(col.attr_type(), col.attr_len()), col_id);
-    col_id ++;
-  }
-  col_id = 0;
-  for(auto& aggrs_expr : value_expressions_) {
-    Column col;
-    aggrs_expr->get_column(chunk_, col);
-    chunk.add_column(make_unique<Column>(col.attr_type(), col.attr_len()), col_id);
-    col_id ++;
-  }
+  chunk.reset();
+  output_chunk_.reset_data();
   // 创建哈希表扫描器
-  StandardAggregateHashTable::Scanner scanner_(&ht_);
-  scanner_.open_scan();
-  RC rc = scanner_.next(chunk);
+
+  RC rc = scanner_->next(output_chunk_);
+  chunk.reference(output_chunk_);
   if (rc == RC::RECORD_EOF) {
     return RC::RECORD_EOF;
   }
@@ -109,6 +93,5 @@ RC GroupByVecPhysicalOperator::close()
     LOG_ERROR("Failed to close child operator: %s", strrc(rc));
     return rc;
   }
-  call_ = false;
   return RC::SUCCESS;
 }

@@ -28,6 +28,7 @@ INSERT INTO aggregation_func VALUES (4, 13, 2.22, 'wei');
 
 -- sort SELECT num, sum(price) FROM aggregation_func where id>=2 group by num;
 
+
 -- sort SELECT id, sum(price) FROM aggregation_func group by id;
 
 -- sort SELECT sum(price), id FROM aggregation_func group by id;
