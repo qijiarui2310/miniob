@@ -425,7 +425,7 @@ RC PaxRecordPageHandler::insert_record(const char *data, RID *rid)
     return RC::RECORD_NOMEM;
   }
   // 找到空闲位置
-  common::Bitmap bitmap(bitmap_, page_header_->record_capacity);
+  Bitmap bitmap(bitmap_, page_header_->record_capacity);
   int index = bitmap.next_unsetted_bit(0);
   bitmap.set_bit(index);
   page_header_->record_num++;
@@ -521,17 +521,18 @@ RC PaxRecordPageHandler::get_chunk(Chunk &chunk)
     LOG_WARN("Page has no records.");
     return RC::SUCCESS;
   }
-  common::Bitmap bitmap(bitmap_, page_header_->record_capacity);
+  Bitmap bitmap(bitmap_, page_header_->record_capacity);
   auto chunk_size = chunk.column_num();
   for (int i = 0; i < chunk_size; i++) {
     int col_id = chunk.column_ids(i);
     auto &column = chunk.column(i);
     // 将页面中的每条记录的该列数据拷贝到chunk中
-    for (int slot_num = 0; slot_num < page_header_->record_capacity; slot_num++) {
-      if (bitmap.get_bit(slot_num)) {
-        char *src_field_data = get_field_data(slot_num, col_id);
-        column.append_one(src_field_data);
-      }
+    int index = bitmap.next_setted_bit(0);
+    while (index!=-1)
+    {
+      char* column_data = get_field_data(index,col_id );
+      column.append_one(column_data);
+      index = bitmap.next_setted_bit(index+1);
     }
   }
   return RC::SUCCESS;

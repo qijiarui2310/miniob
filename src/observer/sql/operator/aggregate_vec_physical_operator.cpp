@@ -105,6 +105,8 @@ RC AggregateVecPhysicalOperator::next(Chunk &chunk)
     return RC::RECORD_EOF;
   }
   call_ = true;
+  output_chunk_.reset_data();
+  chunk.reset();
   for (size_t i = 0; i < aggregate_expressions_.size(); i++) {
     auto *aggregate_expr = static_cast<AggregateExpr *>(aggregate_expressions_[i]);
     if (aggregate_expr->aggregate_type() == AggregateExpr::Type::SUM) {
@@ -126,11 +128,7 @@ RC AggregateVecPhysicalOperator::next(Chunk &chunk)
 
   // 将output_chunk_的数据传给chunk
   // 将output_chunk_的数据复制到传入的chunk
-  for (size_t i = 0; i < output_chunk_.column_num(); ++i){
-    auto col_data = output_chunk_.column(i).data();
-    auto &column = chunk.column(i);
-    column.append_one(col_data);
-  }
+  chunk.reference(output_chunk_);
   return RC::SUCCESS;
 
 }

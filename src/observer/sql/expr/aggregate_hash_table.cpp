@@ -15,13 +15,13 @@ See the Mulan PSL v2 for more details. */
 RC StandardAggregateHashTable::add_chunk(Chunk &groups_chunk, Chunk &aggrs_chunk)
 {
   /** 1 2 3
-    * 1 3 4
-    * 3 3 5
-   * group by c1，c2
-   *1 2
-   *1 3
-   *3 4
-   * aggrs sum c1
+    * 0 3 4
+    * 1 3 5
+   * group by c1
+   *1
+   *0
+   *1
+   * aggrs sum c2
    * 2
    * 3
    * 该函数需要根据group_chunk和aggr_chunk的值，将group_by_values和aggr_values聚合到hash_table中，主要是根据group_chunk的group的列，
