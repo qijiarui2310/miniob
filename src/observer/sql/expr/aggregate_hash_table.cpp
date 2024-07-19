@@ -16,7 +16,7 @@ RC StandardAggregateHashTable::add_chunk(Chunk &groups_chunk, Chunk &aggrs_chunk
 {
   /** 1 2 3
     * 1 3 4
-    * 3 4 5
+    * 3 3 5
    * group by c1，c2
    *1 2
    *1 3
