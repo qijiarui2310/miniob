@@ -1,3 +1,4 @@
+
 /* Copyright (c) 2021 OceanBase and/or its affiliates. All rights reserved.
 miniob is licensed under Mulan PSL v2.
 You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -9,87 +10,62 @@ MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 See the Mulan PSL v2 for more details. */
 
 #include "sql/operator/group_by_vec_physical_operator.h"
-#include "common/log/log.h"
-
-GroupByVecPhysicalOperator::GroupByVecPhysicalOperator(
-    std::vector<std::unique_ptr<Expression>> &&group_by_exprs, std::vector<Expression *> &&expressions)
-    : group_by_exprs_(std::move(group_by_exprs)), ht_(expressions){
-  call_ = false;
-  aggregate_exprs_ = std::move(expressions);
-  value_expressions_.reserve(aggregate_exprs_.size());
-  for(auto expr : aggregate_exprs_) {
-    auto       *aggregate_expr = static_cast<AggregateExpr *>(expr);
-    Expression *child_expr     = aggregate_expr->child().get();
-    ASSERT(child_expr != nullptr, "aggregate expression must have a child expression");
-    value_expressions_.emplace_back(child_expr);
-  }
-
-}
 
 RC GroupByVecPhysicalOperator::open(Trx *trx)
 {
-  // 打开下层算子
   ASSERT(children_.size() == 1, "group by operator only support one child, but got %d", children_.size());
+
   PhysicalOperator &child = *children_[0];
-  RC rc = child.open(trx);
+  RC                rc    = child.open(trx);
   if (OB_FAIL(rc)) {
     LOG_INFO("failed to open child operator. rc=%s", strrc(rc));
     return rc;
   }
-  while ((rc = child.next(chunk_)) == RC::SUCCESS) {
+
+  while (OB_SUCC(rc = child.next(chunk_))) {
+    // 每当拿到一条新的子chunk
+    // 根据group_by_expr 计算子chunk 的 value
+    // 根据该value更新哈希，并返回哈希对应的位置
+    // 根据子chunk 计算aggr_expr的 value
+    // 放入哈希表对应的位置。
+
+    // 在本函数中，使用group_by_exprs拿出group_chunk，使用aggr_exprs拿出aggr_chunk;
     Chunk group_chunk;
     Chunk aggregate_chunk;
-    // 从 chunk 中获取 group by 列和聚合列
-    int col_id = 0;
-    for (auto &expr : group_by_exprs_) {
-      std::unique_ptr<Column> column = std::make_unique<Column>(expr->value_type(),expr->value_length());
-      expr->get_column(chunk_, *column);
-      group_chunk.add_column(std::move(column), col_id);
-      output_chunk_.add_column(make_unique<Column>(expr->value_type(), expr->value_length()), col_id);
-      col_id++;
+    for (size_t group_by_idx = 0; group_by_idx < group_by_exprs_.size(); ++group_by_idx){
+      std::unique_ptr<Column> column_1 = std::make_unique<Column>(group_by_exprs_[group_by_idx]->value_type(),group_by_exprs_[group_by_idx]->value_length());
+      group_by_exprs_[group_by_idx]->get_column(chunk_, *column_1);
+      group_chunk.add_column(std::move(column_1), group_by_exprs_[group_by_idx]->pos());
+      output_chunk_.add_column(make_unique<Column>(group_by_exprs_[group_by_idx]->value_type(),group_by_exprs_[group_by_idx]->value_length()), group_by_idx);
     }
-    col_id = 0;
-    for (auto &expr : value_expressions_) {
-      std::unique_ptr<Column> column = std::make_unique<Column>(expr->value_type(),expr->value_length());
-      expr->get_column(chunk_, *column);
-      aggregate_chunk.add_column(std::move(column), col_id);
-      output_chunk_.add_column(make_unique<Column>(expr->value_type(), expr->value_length()), col_id);
-      col_id++;
+
+    for (size_t aggr_idx = 0; aggr_idx < value_expressions_.size(); aggr_idx++) {
+      std::unique_ptr<Column> column_2 = std::make_unique<Column>(value_expressions_[aggr_idx]->value_type(),value_expressions_[aggr_idx ]->value_length());
+      value_expressions_[aggr_idx]->get_column(chunk_, *column_2);
+      ASSERT(aggregate_expressions_[aggr_idx]->type() == ExprType::AGGREGATION, "expect aggregate expression");
+      aggregate_chunk.add_column(std::move(column_2), value_expressions_[aggr_idx]->pos());
+      output_chunk_.add_column(make_unique<Column>(value_expressions_[aggr_idx]->value_type(),value_expressions_[aggr_idx ]->value_length()), aggr_idx + group_by_exprs_.size());
     }
-    // 将 group by 和聚合列添加到哈希表中
-    rc = ht_.add_chunk(group_chunk, aggregate_chunk);
-    if (OB_FAIL(rc)) {
-      LOG_INFO("failed to add chunks. rc=%s", strrc(rc));
-      return rc;
-    }
+    hashtable->add_chunk(group_chunk, aggregate_chunk);
   }
-  if (rc == RC::RECORD_EOF) {
-    rc = RC::SUCCESS;
-  }
-  return rc;
+
+  hashtable_scanner->open_scan();
+  return RC::SUCCESS;
 }
 
 RC GroupByVecPhysicalOperator::next(Chunk &chunk)
 {
-  chunk.reset();
   output_chunk_.reset_data();
-  // 创建哈希表扫描器
-  StandardAggregateHashTable::Scanner scanner_(&ht_);
-  scanner_.open_scan();
-  RC rc = scanner_.next(output_chunk_);
+  chunk.reset();
+  RC rc = hashtable_scanner->next(output_chunk_);
   chunk.reference(output_chunk_);
-  if (rc == RC::RECORD_EOF) {
-    return RC::RECORD_EOF;
-  }
-  return RC::SUCCESS;
+  return rc;
 }
+
 
 RC GroupByVecPhysicalOperator::close()
 {
-  RC rc = children_[0]->close();
-  if (rc != RC::SUCCESS) {
-    LOG_ERROR("Failed to close child operator: %s", strrc(rc));
-    return rc;
-  }
+  children_[0]->close();
+  LOG_INFO("close group by operator");
   return RC::SUCCESS;
 }
