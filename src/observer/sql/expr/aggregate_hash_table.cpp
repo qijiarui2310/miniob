@@ -27,7 +27,7 @@ RC StandardAggregateHashTable::add_chunk(Chunk &groups_chunk, Chunk &aggrs_chunk
    * 该函数需要根据group_chunk和aggr_chunk的值，将group_by_values和aggr_values聚合到hash_table中，主要是根据group_chunk的group的列，
    * 计算相应聚合列的聚合值，并将聚合结果存在hash_table的aggr_values中.
    */
-  for (size_t i = 0; i < groups_chunk.rows(); ++i) {
+  for (size_t i = 0; i < groups_chunk.rows(); i++) {
     //用于存储每一行group和aggregate值，即一行一行元素去执行aggregate操作
     //注意区分aggregate_val和aggr_values_,aggregate_val为chunk中的内容，而aggr_values_为hash_table中聚合后的值，这里只考虑sum的情况
     std::vector<Value> group_val, aggregate_val;
@@ -39,13 +39,13 @@ RC StandardAggregateHashTable::add_chunk(Chunk &groups_chunk, Chunk &aggrs_chunk
     }
     //下面执行聚合操作
     if(aggr_values_.count(group_val)!=0){
-      for(size_t agg_id = 0; agg_id<aggrs_chunk.column_num(); i++){
+      for(size_t agg_id = 0; agg_id<aggrs_chunk.column_num(); agg_id++){
         if (aggr_values_[group_val].at(agg_id).attr_type() == AttrType::INTS) {
-          auto old_value = aggr_values_.at(group_val).at(agg_id).get_int();
+          auto old_value = aggr_values_[group_val].at(agg_id).get_int();
           aggr_values_[group_val].at(agg_id).set_int(old_value + aggregate_val.at(agg_id).get_int());
         } else if (aggr_values_[group_val].at(agg_id).attr_type() == AttrType::FLOATS) {
-          auto old_value = aggr_values_.at(group_val).at(agg_id).get_float();
-          aggr_values_[group_val].at(agg_id).set_int(old_value + aggregate_val.at(agg_id).get_float());
+          auto old_value = aggr_values_[group_val].at(agg_id).get_float();
+          aggr_values_[group_val].at(agg_id).set_float(old_value + aggregate_val.at(agg_id).get_float());
         } else {
           ASSERT(false, "not supported value type");
         }

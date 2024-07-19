@@ -22,7 +22,7 @@ AggregateVecPhysicalOperator::AggregateVecPhysicalOperator(vector<Expression *> 
 {
   aggregate_expressions_ = std::move(expressions);
   value_expressions_.reserve(aggregate_expressions_.size());
-
+  call_= false;
   ranges::for_each(aggregate_expressions_, [this](Expression *expr) {
     auto *      aggregate_expr = static_cast<AggregateExpr *>(expr);
     Expression *child_expr     = aggregate_expr->child().get();
@@ -109,9 +109,13 @@ RC AggregateVecPhysicalOperator::next(Chunk &chunk)
     auto *aggregate_expr = static_cast<AggregateExpr *>(aggregate_expressions_[i]);
     if (aggregate_expr->aggregate_type() == AggregateExpr::Type::SUM) {
       if (aggregate_expr->value_type() == AttrType::INTS) {
+        chunk.add_column(make_unique<Column>(AttrType::INTS, sizeof(int)), i);
         append_to_column<SumState<int>, int>(aggr_values_.at(i), output_chunk_.column(i));
+
       }else if (aggregate_expr->value_type() == AttrType::FLOATS) {
+        chunk.add_column(make_unique<Column>(AttrType::FLOATS, sizeof(float)), i);
         append_to_column<SumState<float>, float>(aggr_values_.at(i), output_chunk_.column(i));
+
       } else {
         ASSERT(false, "not supported value type");
       }
@@ -134,6 +138,7 @@ RC AggregateVecPhysicalOperator::next(Chunk &chunk)
 RC AggregateVecPhysicalOperator::close()
 {
   children_[0]->close();
+  call_ = false;
   LOG_INFO("close group by operator");
   return RC::SUCCESS;
 }
